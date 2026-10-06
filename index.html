@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Call Complexity Scorecard — Portable Demo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            walmart: { blue: '#0053e2', spark: '#ffc220', darkblue: '#001e5a', red: '#ea1100', green: '#2a8703' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: linear-gradient(145deg, #eef3fb 0%, #f5f7ff 50%, #fffbef 100%); min-height: 100vh; }
+    .filter-select { border: 1px solid #c7d2f0; border-radius: 6px; padding: 6px 12px; font-size: 0.875rem; background: white; outline: none; transition: border-color .15s; }
+    .filter-select:focus { border-color: #0053e2; box-shadow: 0 0 0 2px rgba(0,83,226,.15); }
+    .kpi-card { background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,83,226,.08); border: 1px solid #dce8ff; border-top: 3px solid #0053e2; padding: 20px; text-align: center; transition: box-shadow .2s, transform .2s; }
+    .kpi-card:hover { box-shadow: 0 6px 20px rgba(0,83,226,.15); transform: translateY(-1px); }
+    .chart-box { background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,83,226,.07); border: 1px solid #dce8ff; border-left: 4px solid #0053e2; padding: 20px; }
+    .methodology-row:nth-child(even) { background: #eef3fb; }
+    .tier-btn { padding: 6px 12px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; border: 1px solid #c7d2f0; background: white; cursor: pointer; transition: all .15s; }
+    .tier-btn-active { background: #0053e2; color: white; border-color: #0053e2; }
+    /* Walmart spark yellow accent stripe at top of page */
+    body::before { content: ''; display: block; height: 4px; background: linear-gradient(90deg, #0053e2 0%, #ffc220 50%, #0053e2 100%); position: fixed; top: 0; left: 0; right: 0; z-index: 9999; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    @keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+    .live-dot { animation: live-pulse 2s ease-in-out infinite; }
+    .htmx-indicator { opacity: 0; transition: opacity .2s; }
+    .htmx-request .htmx-indicator { opacity: 1; }
+  </style>
+</head>
+<body class="min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-gradient-to-r from-[#001e5a] via-[#0053e2] to-[#0053e2] text-white py-4 px-6 shadow-lg mt-1">
+    <div class="max-w-[1400px] mx-auto flex items-center justify-between flex-wrap gap-3">
+      <div class="flex items-center gap-4">
+        <!-- Walmart Spark -->
+        <svg class="w-10 h-10 text-[#ffc220] flex-shrink-0" fill="currentColor" viewBox="0 0 36 36">
+          <path d="M18 0l2.45 7.55L28 5.27l-5.45 5.45L28 16.18l-7.55-2.45L18 21.27l-2.45-7.54L8 16.18l5.45-5.46L8 5.27l7.55 2.28z" opacity=".95"/>
+          <path d="M18 21.27l2.45 7.54L28 30.73l-5.45-5.45L28 19.82l-7.55 2.45L18 14.73l-2.45 7.54L8 19.82l5.45 5.46L8 30.73l7.55-2.46z" opacity=".6"/>
+        </svg>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-[#ffc220] font-black text-sm tracking-widest uppercase">Walmart</span>
+            <span class="w-px h-4 bg-white/30"></span>
+            <h1 class="text-xl font-bold tracking-tight">Call Complexity Scorecard</h1>
+          </div>
+          <p id="dateRange" class="text-blue-200 text-xs mt-0.5">Loading...</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="flex items-center gap-1.5 text-xs text-blue-200">
+          <span class="live-dot inline-flex h-2.5 w-2.5 rounded-full bg-[#ffc220]"></span>
+          DEMO &bull; Sample data, not live
+        </div>
+        <div id="lastUpdated" class="text-xs text-blue-200">Loading&hellip;</div>
+        <button id="btnRefresh" onclick="refreshAll(true)"
+          class="px-3 py-1.5 text-xs font-semibold bg-white/10 hover:bg-white/20 border border-white/30 rounded-md transition flex items-center gap-1.5">
+          <svg id="refreshIcon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h5M20 20v-5h-5M4 9a9 9 0 0114.5-5.2M20 15a9 9 0 01-14.5 5.2"/>
+          </svg>
+          Refresh Now
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Sticky Filter Bar -->
+  <section class="bg-white border-b-2 border-[#ffc220] py-3 px-6 shadow-sm sticky top-1 z-30">
+    <div class="max-w-[1400px] mx-auto">
+      <div class="flex items-center gap-3 flex-wrap">
+        <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Filters:</span>
+        <select id="fSublob" name="sublob" class="filter-select filter-val" aria-label="Filter by Sub-LOB">
+          <option value="">All Sub-LOBs</option>
+        </select>
+        <select id="fDepartment" name="department" class="filter-select filter-val" aria-label="Filter by Department">
+          <option value="">All Departments</option>
+        </select>
+        <select id="fChannel" name="channel" class="filter-select filter-val" aria-label="Filter by Channel">
+          <option value="">All Channels</option>
+        </select>
+        <select id="fQueue" name="queue" class="filter-select filter-val min-w-[200px]" aria-label="Filter by Queue">
+          <option value="">All Queues</option>
+        </select>
+        <select id="fMonthYear" name="month_year" class="filter-select filter-val" multiple size="1" aria-label="Filter by Month">
+          <!-- Populated by JavaScript - defaults to last completed month -->
+        </select>
+        <button onclick="selectAllMonths()" title="Select all months"
+          class="px-2 py-1.5 text-xs font-semibold text-[#0053e2] border border-[#0053e2] rounded-md hover:bg-blue-50 transition">All</button>
+        <button onclick="applyMonthFilter()" title="Apply selected months"
+          class="px-3 py-1.5 text-xs font-semibold bg-[#0053e2] text-white border border-[#0053e2] rounded-md hover:bg-[#003bb3] transition">Apply</button>
+        <button onclick="resetFilters()"
+          class="px-3 py-1.5 text-xs font-semibold text-[#0053e2] border border-[#0053e2] rounded-md hover:bg-blue-50 transition">Reset</button>
+        <span id="filterCount" class="ml-auto text-sm font-semibold text-gray-600"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main Content -->
+  <main class="max-w-[1400px] mx-auto px-6 py-6 space-y-6">
+
+    <!-- KPI Cards (JS-managed) -->
+    <section id="kpiSection" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4" aria-label="Key Performance Indicators">
+      <div class="kpi-card col-span-7 text-gray-400 text-center py-8">Loading KPIs&hellip;</div>
+    </section>
+
+    <!-- Executive Insights -->
+    <section class="chart-box">
+      <h2 class="text-sm font-bold text-[#001e5a] uppercase tracking-wider mb-3 flex items-center gap-2">
+        <svg class="w-4 h-4 text-[#ffc220]" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zm4.657 2.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zm3 6v-1h4v1a2 2 0 11-4 0zm4-2c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z"/>
+        </svg>
+        Executive Insights
+      </h2>
+      <div id="insightsContent" class="text-sm text-gray-700 space-y-2">
+        <div class="text-gray-400">Generating insights&hellip;</div>
+      </div>
+    </section>
+
+    <!-- Charts Row 1 -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="chart-box">
+        <h3 class="text-sm font-bold text-[#001e5a] mb-3">Score Distribution</h3>
+        <div style="height:280px"><canvas id="chartHist"></canvas></div>
+      </div>
+      <div class="chart-box">
+        <h3 class="text-sm font-bold text-[#001e5a] mb-3">Medium &amp; High Complexity Volume by Channel</h3>
+        <div style="height:280px"><canvas id="chartChannel"></canvas></div>
+      </div>
+    </section>
+
+    <!-- Charts Row 2 -->
+    <section class="grid grid-cols-1 gap-4">
+      <div class="chart-box">
+        <h3 class="text-sm font-bold text-[#001e5a] mb-3">Top 10 Dept/Channel by Medium &amp; High Complexity Volume</h3>
+        <div style="height:500px"><canvas id="chartDeptChannel"></canvas></div>
+      </div>
+    </section>
+
+    <!-- Charts Row 2b -->
+    <section class="grid grid-cols-1 gap-4">
+      <div class="chart-box">
+        <h3 class="text-sm font-bold text-[#001e5a] mb-3">Top 10 Queues by Medium &amp; High Complexity Volume</h3>
+        <div style="height:500px"><canvas id="chartQueue"></canvas></div>
+      </div>
+    </section>
+
+    <!-- Weekly Trend Pivot Table -->
+    <section class="chart-box">
+      <h3 class="text-sm font-bold text-[#001e5a] mb-3">Weekly Contact Volume &amp; Complexity Trend</h3>
+      <div class="overflow-x-auto">
+        <div id="weeklyPivotTable" class="text-sm">
+          <div class="text-gray-400 text-center py-8">Loading weekly data...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Scoring Methodology (static) -->
+    <section class="chart-box">
+      <h2 class="text-sm font-bold text-[#001e5a] uppercase tracking-wider mb-3">Scoring Methodology &amp; Weight Rationale</h2>
+      <p class="text-xs text-gray-500 mb-2">Each contact scored across 6 KPI dimensions. Rated into Bucket 1 (low), 2 (medium), or 3 (high). Final score uses min&ndash;max normalization:</p>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-3 font-mono text-xs text-gray-700">
+        <div><strong>composite</strong> = &Sigma; (bucket_score<sub>i</sub> &times; weight<sub>i</sub>)</div>
+        <div><strong>score</strong> = ((composite &minus; 10.0) / 20.0) &times; 100</div>
+        <div class="text-gray-400 mt-1">Min=10.0 (all Bucket 1) &rarr; Score 0 &nbsp;|&nbsp; Max=30.0 (all Bucket 3) &rarr; Score 100</div>
+      </div>
+      <div class="flex gap-4 mb-3 text-xs flex-wrap">
+        <div class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-green-600"></span><strong>Low (0&ndash;25)</strong>: Routine</div>
+        <div class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-yellow-500"></span><strong>Medium (26&ndash;40)</strong>: Moderate effort</div>
+        <div class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-red-600"></span><strong>High (41+)</strong>: Senior agent recommended</div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="bg-[#0053e2] text-white text-xs uppercase tracking-wider">
+              <th class="px-4 py-2.5 text-left rounded-tl-lg">KPI Attribute</th>
+              <th class="px-4 py-2.5 text-left">Column</th>
+              <th class="px-4 py-2.5 text-center">Weight</th>
+              <th class="px-4 py-2.5 text-left">Score 1 (Low)</th>
+              <th class="px-4 py-2.5 text-left">Score 2 (Medium)</th>
+              <th class="px-4 py-2.5 text-left rounded-tr-lg">Score 3 (High)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- 1. Contact Reason - Weight 3.5 (Highest) -->
+            <tr class="methodology-row">
+              <td class="px-4 py-2.5 font-semibold text-[#0053e2]">
+                Contact Reason
+                <div class="text-[10px] font-normal text-gray-400 mt-0.5">Dynamic — ranked by avg AHT per month</div>
+              </td>
+              <td class="px-4 py-2.5 font-mono text-xs">case_category_score</td>
+              <td class="px-4 py-2.5 text-center font-bold">3.5</td>
+              <td class="px-4 py-2.5 text-green-700">
+                Rank 41+ categories
+                <div class="text-[10px] text-gray-400">Lowest AHT bucket</div>
+              </td>
+              <td class="px-4 py-2.5 text-yellow-700">
+                Rank 21–40 categories
+                <div class="text-[10px] text-gray-400">Mid AHT bucket (next 20)</div>
+              </td>
+              <td class="px-4 py-2.5 text-red-700">
+                Top 20 categories
+                <div class="text-[10px] text-gray-400">Highest avg AHT</div>
+              </td>
+            </tr>
+            
+            <!-- 2. Workflow Count - Weight 2.0 -->
+            <tr class="methodology-row">
+              <td class="px-4 py-2.5 font-semibold text-[#ff5722]">Workflow Count</td>
+              <td class="px-4 py-2.5 font-mono text-xs">workflow_score</td>
+              <td class="px-4 py-2.5 text-center font-bold">2.0</td>
+              <td class="px-4 py-2.5 text-green-700">&le; 2 workflows</td>
+              <td class="px-4 py-2.5 text-yellow-700">3–10 workflows</td>
+              <td class="px-4 py-2.5 text-red-700">&gt; 10 workflows</td>
+            </tr>
+            
+            <!-- 3. Customer Talk % - Weight 2.0 -->
+            <tr class="methodology-row">
+              <td class="px-4 py-2.5 font-semibold text-[#ff9800]">Customer Talk %</td>
+              <td class="px-4 py-2.5 font-mono text-xs">talk_pct_score</td>
+              <td class="px-4 py-2.5 text-center font-bold">2.0</td>
+              <td class="px-4 py-2.5 text-green-700">
+                &lt; 20%
+                <div class="text-[10px] text-gray-400">Low customer talk share</div>
+              </td>
+              <td class="px-4 py-2.5 text-yellow-700">
+                21–45%
+                <div class="text-[10px] text-gray-400">Moderate talk share</div>
+              </td>
+              <td class="px-4 py-2.5 text-red-700">
+                &gt; 45%
+                <div class="text-[10px] text-gray-400">High customer talk share</div>
+              </td>
+            </tr>
+            
+            <!-- 4. Repeat Caller - Weight 1.5 -->
+            <tr class="methodology-row">
+              <td class="px-4 py-2.5 font-semibold text-[#1a73e8]">Repeat Caller</td>
+              <td class="px-4 py-2.5 font-mono text-xs">repeat_caller_score</td>
+              <td class="px-4 py-2.5 text-center font-bold">1.5</td>
+              <td class="px-4 py-2.5 text-green-700">First call</td>
+              <td class="px-4 py-2.5 text-yellow-700">2nd call</td>
+              <td class="px-4 py-2.5 text-red-700">3rd+ call</td>
+            </tr>
+            
+            <!-- 5. Transfer Count - Weight 0.5 -->
+            <tr class="methodology-row">
+              <td class="px-4 py-2.5 font-semibold text-[#4285f4]">Transfer Count</td>
+              <td class="px-4 py-2.5 font-mono text-xs">transfer_score</td>
+              <td class="px-4 py-2.5 text-center font-bold">0.5</td>
+              <td class="px-4 py-2.5 text-green-700">No transfer</td>
+              <td class="px-4 py-2.5 text-yellow-700">1 transfer</td>
+              <td class="px-4 py-2.5 text-red-700">2+ transfers</td>
+            </tr>
+            
+            <!-- 6. Gen / Non-Gen - Weight 0.5 -->
+            <tr class="methodology-row">
+              <td class="px-4 py-2.5 font-semibold text-gray-600">
+                Gen / Non-Gen
+                <div class="text-[10px] font-normal text-gray-400 mt-0.5">Genuine × Top 20 AHT matrix</div>
+              </td>
+              <td class="px-4 py-2.5 font-mono text-xs">gen_score</td>
+              <td class="px-4 py-2.5 text-center font-bold">0.5</td>
+              <td class="px-4 py-2.5 text-green-700">
+                Genuine &amp; non-Top 20
+                <div class="text-[10px] text-gray-400">Standard resolution path</div>
+              </td>
+              <td class="px-4 py-2.5 text-yellow-700">
+                Genuine &amp; Top 20 <em>or</em><br>Non-genuine &amp; non-Top 20
+                <div class="text-[10px] text-gray-400">Mixed complexity signals</div>
+              </td>
+              <td class="px-4 py-2.5 text-red-700">
+                Non-genuine &amp; Top 20
+                <div class="text-[10px] text-gray-400">Highest agent friction</div>
+              </td>
+            </tr>
+
+          </tbody>
+        </table>
+      </div>
+      <!-- Detailed Scoring Model link removed in the portable demo (pointed to an internal-only page) -->
+    </section>
+
+    <!-- Contact Drilldown (HTMX list + JS detail panel) -->
+    <section class="chart-box" id="drilldownSection">
+      <h2 class="text-sm font-bold text-[#001e5a] uppercase tracking-wider mb-1 flex items-center gap-2">
+        <svg class="w-4 h-4 text-[#0053e2]" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/>
+        </svg>
+        Contact-Level Drilldown
+      </h2>
+      <p class="text-xs text-gray-500 mb-3">Select a contact to see its full KPI score breakdown and spider chart. Filter by complexity tier below.</p>
+
+      <!-- Tier filter buttons -->
+      <div class="flex items-center gap-2 mb-4" role="group" aria-label="Filter by complexity tier">
+        <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Complexity:</span>
+        <button id="tierAll" class="tier-btn tier-btn-active" onclick="setDrillTier('', this)">All</button>
+        <button id="tierLow" class="tier-btn" onclick="setDrillTier('LOW', this)">
+          <span class="inline-block w-2 h-2 rounded-full bg-green-600 mr-1"></span>Low (0&ndash;25)
+        </button>
+        <button id="tierMed" class="tier-btn" onclick="setDrillTier('MEDIUM', this)">
+          <span class="inline-block w-2 h-2 rounded-full bg-yellow-500 mr-1"></span>Medium (26&ndash;40)
+        </button>
+        <button id="tierHigh" class="tier-btn" onclick="setDrillTier('HIGH', this)">
+          <span class="inline-block w-2 h-2 rounded-full bg-red-600 mr-1"></span>High (41+)
+        </button>
+      </div>
+
+      <!-- Split: contact list (left) + detail panel (right) -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+
+        <!-- Left: search + HTMX contact list -->
+        <div class="lg:col-span-3">
+          <input type="text" id="contactSearch"
+            oninput="filterContactList(this.value)"
+            placeholder="Search Contact ID&hellip;"
+            aria-label="Search contact ID"
+            class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none mb-2">
+          <div id="contactsPanel"
+  class="border border-gray-200 rounded-md max-h-[500px] overflow-y-auto bg-white">
+  <div class="text-center py-8 text-gray-400 text-sm">Loading contacts&hellip;</div>
+</div>
+        </div>
+
+        <!-- Right: detail panel -->
+        <div class="lg:col-span-9">
+          <!-- Placeholder -->
+          <div id="contactPlaceholder" class="text-center py-20 text-gray-400">
+            <svg class="w-14 h-14 mx-auto mb-3 text-gray-300" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0010 11z" clip-rule="evenodd"/>
+            </svg>
+            <p class="text-sm">Select a contact from the list to view its detailed KPI breakdown.</p>
+          </div>
+          <!-- Detail (hidden until contact selected) -->
+          <div id="contactDetail" class="hidden">
+            <!-- Top row: info card + score card + radar -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <!-- Info -->
+              <div class="bg-gray-50 rounded-lg p-4">
+                <div class="text-xs text-gray-500 uppercase tracking-wider mb-2">Contact Information</div>
+                <div id="contactInfo" class="space-y-1 text-sm"></div>
+              </div>
+              <!-- Score card -->
+              <div id="contactScoreCard" class="rounded-lg p-4 text-center flex flex-col justify-center"></div>
+              <!-- Radar -->
+              <div style="height:240px">
+                <canvas id="chartRadar"></canvas>
+              </div>
+            </div>
+            <!-- KPI Breakdown table -->
+            <div>
+              <div class="text-xs text-gray-500 uppercase tracking-wider mb-2">KPI Score Breakdown</div>
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="bg-gray-100 text-xs uppercase tracking-wider text-gray-600">
+                      <th class="px-3 py-2 text-left">KPI Attribute</th>
+                      <th class="px-3 py-2 text-center">Bucket Score</th>
+                      <th class="px-3 py-2 text-center">Weight</th>
+                      <th class="px-3 py-2 text-center">Score &times; Weight</th>
+                      <th class="px-3 py-2 text-left">Visual</th>
+                    </tr>
+                  </thead>
+                  <tbody id="kpiBreakdownBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Recommendations -->
+    <section class="chart-box">
+      <h2 class="text-sm font-bold text-[#001e5a] uppercase tracking-wider mb-3">Recommendations for Leadership</h2>
+      <div id="recommendations" class="text-sm text-gray-700 space-y-2">
+        <div class="text-gray-400">Loading&hellip;</div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="bg-gradient-to-r from-[#001e5a] via-[#0053e2] to-[#001e5a] text-white mt-10 py-6 px-6">
+    <div class="max-w-[1400px] mx-auto flex items-center justify-between flex-wrap gap-4">
+      <div class="flex items-center gap-3">
+        <svg class="w-7 h-7 text-[#ffc220]" fill="currentColor" viewBox="0 0 36 36">
+          <path d="M18 0l2.45 7.55L28 5.27l-5.45 5.45L28 16.18l-7.55-2.45L18 21.27l-2.45-7.54L8 16.18l5.45-5.46L8 5.27l7.55 2.28z"/>
+        </svg>
+        <div>
+          <div class="text-[#ffc220] font-black text-xs tracking-widest uppercase">Walmart</div>
+          <div class="text-white font-semibold text-sm">Call Complexity Scorecard</div>
+        </div>
+      </div>
+      <div class="text-blue-200 text-xs text-center">
+        Sample data — for demonstration only. Created by Victor Chowdhury.
+      </div>
+      <div class="flex items-center gap-3 text-xs text-blue-200">
+      </div>
+    </div>
+    <div class="max-w-[1400px] mx-auto mt-3 pt-3 border-t border-white/10 text-center">
+      <div class="w-24 h-1 mx-auto rounded-full" style="background: linear-gradient(90deg, #0053e2, #ffc220, #0053e2)"></div>
+    </div>
+  </footer>
+
+  <script>window.__TABLE_REF__ = "sample-data";</script>
+  <script src="sample_contacts.js"></script>
+  <script src="portable-data.js"></script>
+  <script src="dashboard.js?v=12"></script>
+</body>
+</html>
